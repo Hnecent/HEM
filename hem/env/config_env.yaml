@@ -1,0 +1,49 @@
+MINUTES_PER_TIME_STEP: &MINUTES_PER_TIME_STEP 5
+
+AC_ATTRIBUTES:
+  name: 'AC'
+  nominal_power: 1.5
+  standby_power: 0.01
+  efficiency: 0.08
+  max_cop: 3.51
+  state_space: [ -1, 0, 1 ]
+
+BESS_ATTRIBUTES:
+  name: 'BESS'
+  charge_nominal_power: 3
+  discharge_nominal_power: 3
+  charge_efficiency: 0.98
+  discharge_efficiency: 0.98
+  capacity: 50
+  loss_coefficient: 0.005
+  minutes_per_time_step: *MINUTES_PER_TIME_STEP
+  state_space: [ -1, 0, 1 ]
+
+WASHER_ATTRIBUTES:
+  name: 'washer'
+  nominal_power: 1.2
+  standby_power: 0.01
+  min_continuous_working_time: 45
+  minutes_per_time_step: *MINUTES_PER_TIME_STEP
+  state_space: [ 0, 1 ]
+
+PV_ATTRIBUTES:
+  name: 'PV'
+  nominal_power: 1.3
+  efficiency: 0.2
+  min_solar_radiation: 10
+  panel_area: 10
+  state_space: [ 0, 1 ]
+
+AIR_HEAT_DYNAMICS_ATTRIBUTES:
+  minutes_per_time_step: *MINUTES_PER_TIME_STEP
+  A_fen: 16
+  V: 420
+  A_suf: 266
+  C_air: 0.3
+  p_air: 1.3
+  U: 0.93
+  ACH: 0.7
+  SHGC: 0.3
+
+# 63平米，高5米的方盒子，宽7，长9
