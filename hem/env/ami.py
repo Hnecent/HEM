@@ -36,7 +36,10 @@ class AMI:
 
         self.__init_buffer()
         self.laundry_demand_time = None
+        self.laundry_allowed_border = None
+        self.laundry_demand_count = 0
         self.washer_start_time = None
+        self.washer_start_count = 0
 
         # base_load prediction model
         self.base_load_pre_model = TimeSeriesModel()
@@ -55,7 +58,7 @@ class AMI:
             # carbon
             'carbon_intensity', 'carbon_production',  # carbon
             # demand
-            'target_temperature', 'laundry_demand',
+            'target_temperature', 'laundry_demand', 'laundry_allowed_waiting_time',
             # heat dynamic model
             'indoor_temperature',
             # time
@@ -66,6 +69,8 @@ class AMI:
             'electrical_price',
             'base_load',
             'occupancy',
+            # auxiliary
+            'delayed_duration',
         ]
         # pre
         if pre:
@@ -133,6 +138,7 @@ class AMI:
             # demand
             'target_temperature_history': [],
             'laundry_demand_history': [],
+            'laundry_allowed_waiting_time_history': [],
 
             # heat dynamic model
             'indoor_temperature_history': [],
@@ -197,31 +203,27 @@ class AMI:
 
     def delayed_duration(self, time_step: int):
 
+        """
+        计算启动洗衣机的延迟时间，即洗衣机启动时间与（洗衣需求时间 + 最大允许等待时间）的差值
+
+        """
+
         if self.running_buffer['laundry_demand_history'][-1] == 1 and self.running_buffer['laundry_demand_history'][
             -2] == 0:
             self.laundry_demand_time = time_step
+            self.laundry_allowed_border = time_step + (
+                    self.running_buffer['laundry_allowed_waiting_time_history'][-1] / self.minutes_per_time_step)
+            self.laundry_demand_count += 1
 
         if self.running_buffer['washer_state_history'][-1] == 1 and self.running_buffer['washer_state_history'][
-            -2] == 0:
+            -2] and (self.laundry_demand_count > self.washer_start_count):
             self.washer_start_time = time_step
+            self.washer_start_count += 1
 
-        if self.laundry_demand_time is None:
+        if self.laundry_demand_count <= self.washer_start_count:
             delayed_duration = 0
-        elif self.washer_start_time is None:
-            delayed_duration = time_step - self.laundry_demand_time
         else:
-            if self.washer_start_time < self.laundry_demand_time:
-                delayed_duration = time_step - self.laundry_demand_time
-            else:
-                delayed_duration = self.washer_start_time - self.laundry_demand_time
-                self.laundry_demand_time = None
-
-        # print(
-        #     f"delayed_duration: {delayed_duration}, "
-        #     f"laundry_demand: {self.running_buffer['laundry_demand_history'][-1]}, "
-        #     f"laundry_demand_time: {self.laundry_demand_time}, "
-        #     f"washer_state: {self.running_buffer['washer_state_history'][-1]}, "
-        #     f"washer_start_time: {self.washer_start_time}")
+            delayed_duration = max(time_step - self.laundry_allowed_border, 0)
 
         return delayed_duration
 
@@ -331,6 +333,7 @@ class AMI:
         # demand
         self.running_buffer['target_temperature_history'].append(self.demand.target_temperature)
         self.running_buffer['laundry_demand_history'].append(self.demand.laundry_demand)
+        self.running_buffer['laundry_allowed_waiting_time_history'].append(self.demand.laundry_allowed_waiting_time)
 
         # heat dynamic model
         self.running_buffer['indoor_temperature_history'].append(self.air_heat_dynamics.indoor_temperature)
@@ -371,13 +374,18 @@ class AMI:
         """
         return the observation of the environment
         """
-        return np.array([self.running_buffer[variable + '_history'][-1] for variable in self.observation_variables],
-                        dtype=np.float32)
+        observation = np.array(
+            [self.running_buffer[variable + '_history'][-1] for variable in self.observation_variables],
+            dtype=np.float32)
+        return observation
 
     def reset(self):
         self.__init_buffer()
         self.laundry_demand_time = None
+        self.laundry_allowed_border = None
+        self.laundry_demand_count = 0
         self.washer_start_time = None
+        self.washer_start_count = 0
 
 
 class TimeSeriesModel(nn.Module):

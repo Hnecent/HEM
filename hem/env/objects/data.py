@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import os
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), '../data/california_3938_2016_minute_data_modify_carbon.csv')
+# DATA_PATH = os.path.join(os.path.dirname(__file__), '../data/california_3938_2016_minute_data_modify_carbon.csv')
+DATA_PATH = os.path.join(os.path.dirname(__file__), '../data/california_3938_2016_minute_data_modify_carbon_laundry.csv')
 
 
 def get_mean_std(data_line):
@@ -66,6 +67,8 @@ class Data:
         self.electrical_price = data['Electricity Pricing [$/kWh]'].astype(np.float32) * 100  # cent
         self.occupancy = data['Occupancy'].astype(int)
         self.carbon_intensity = data['Carbon Intensity [kg/kWh]'].astype(np.float32)
+        self.laundry_demand = data['Laundry Demand'].astype(int)
+        self.laundry_allowed_waiting_time = data['Laundry Allowed Waiting Time'].astype(np.float32)
 
         self.length = len(data)
 

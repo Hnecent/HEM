@@ -201,5 +201,5 @@ if __name__ == '__main__':
     命名规则：env_model_device
     """
 
-    user_experiment_name = 'sa_stack_sac_bess_fe_no_base'
+    user_experiment_name = 'sa_stack_sac_washer_fe'
     train_pipline(user_experiment_name, train_timesteps, device)

@@ -21,20 +21,10 @@ class Demand:
 
         self.episode_target_temperature = None
         self.target_temperature = None
-        self.laundry_demand = None
 
         # laundry demand
-        self.laundry_demand_bins = {
-            1: 0.6,  # Monday
-            2: 0.8,  # Tuesday
-            3: 0.8,  # Wednesday
-            4: 0.8,  # Thursday
-            5: 0.8,  # Friday
-            6: 0.8,  # Saturday
-            7: 0.8  # Sunday
-        }
-
-        self.episode_laundry_demand = None
+        self.laundry_demand = None
+        self.laundry_allowed_waiting_time = None
 
     def update(self, time_step: int):
         self.__update_target_temperature()
@@ -44,10 +34,10 @@ class Demand:
         self.target_temperature = self.episode_target_temperature
 
     def __update_laundry_demand(self, time_step: int):
-        pass
+        self.laundry_demand = self.data.laundry_demand[time_step]
+        self.laundry_allowed_waiting_time = self.data.laundry_allowed_waiting_time[time_step]
 
-    def reset(self):
+    def reset(self, time_step: int):
         temp = random.gauss(self.target_temp_params["mean"], self.target_temp_params["std"])
         self.episode_target_temperature = np.clip(temp, self.target_temp_params["min"], self.target_temp_params["max"])
-
-        episode_probs = [self.laundry_demand_bins[self.data.day[0]]]
+        self.update(time_step)

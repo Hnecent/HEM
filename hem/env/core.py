@@ -167,7 +167,7 @@ class HEMEnv:
                                           self.random_episode_split, random_seed=self.random_seed)
         self.time_step = self.episode_tracker.episode_start_time_step
 
-        self.demand.reset()
+        self.demand.reset(self.time_step)
 
         self.AC.reset(indoor_temperature=self.demand.target_temperature,
                       outdoor_temperature=self.AMI.data.outdoor_temperature[self.time_step])
@@ -213,7 +213,7 @@ class RawAECEnv(AECEnv):
         self.possible_agents = ['AC', 'washer', 'BESS']
 
         self._action_spaces = {'AC': gymnasium.spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32),
-                               'washer': gymnasium.spaces.Box(low=-1, high=1, shape=(5,), dtype=np.float32),
+                               'washer': gymnasium.spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32),
                                'BESS': gymnasium.spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32), }
 
         self._observation_space = {
@@ -302,13 +302,15 @@ class RawAECEnv(AECEnv):
 
     def _action_transform(self, agent: AgentID, actions: np.ndarray):
         control = np.argmax(actions[0:2])
-        state_expectation = np.argmax(actions[2:5]) - 1
 
         if agent == 'AC':
+            state_expectation = np.argmax(actions[2:5]) - 1
             power_expectation = (actions[5] + 1) * self.hem_env.AC.nominal_power / 2
         elif agent == 'washer':
+            state_expectation = np.argmax(actions[2:4])
             power_expectation = self.hem_env.washer.nominal_power
         elif agent == 'BESS':
+            state_expectation = np.argmax(actions[2:5]) - 1
             if state_expectation > 0:
                 power_expectation = (actions[5] + 1) * self.hem_env.BESS.charge_nominal_power / 2
             else:
@@ -338,7 +340,7 @@ class RawParallelEnv(ParallelEnv):
         self.possible_agents = ['AC', 'washer', 'BESS']
 
         self._action_spaces = {'AC': gymnasium.spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32),
-                               'washer': gymnasium.spaces.Box(low=-1, high=1, shape=(5,), dtype=np.float32),
+                               'washer': gymnasium.spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32),
                                'BESS': gymnasium.spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32), }
 
         self._observation_space = {
@@ -407,13 +409,15 @@ class RawParallelEnv(ParallelEnv):
 
     def _action_transform(self, agent: AgentID, actions: np.ndarray):
         control = np.argmax(actions[0:2])
-        state_expectation = np.argmax(actions[2:5]) - 1
 
         if agent == 'AC':
+            state_expectation = np.argmax(actions[2:5]) - 1
             power_expectation = (actions[5] + 1) * self.hem_env.AC.nominal_power / 2
         elif agent == 'washer':
+            state_expectation = np.argmax(actions[2:4])
             power_expectation = self.hem_env.washer.nominal_power
         elif agent == 'BESS':
+            state_expectation = np.argmax(actions[2:5]) - 1
             if state_expectation > 0:
                 power_expectation = (actions[5] + 1) * self.hem_env.BESS.charge_nominal_power / 2
             else:
@@ -440,10 +444,10 @@ class RawSAEnv(ParallelEnv):
                               random_seed, noise_strength, config_path)
         self.state = self.hem_env.AMI.running_buffer  # state是环境的所有内部状态
 
-        self.possible_agents = ['BESS']
+        self.possible_agents = ['washer']
 
         self._action_spaces = {'AC': gymnasium.spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32),
-                               'washer': gymnasium.spaces.Box(low=-1, high=1, shape=(5,), dtype=np.float32),
+                               'washer': gymnasium.spaces.Box(low=-1, high=1, shape=(4,), dtype=np.float32),
                                'BESS': gymnasium.spaces.Box(low=-1, high=1, shape=(6,), dtype=np.float32), }
 
         self._observation_space = {
@@ -519,13 +523,15 @@ class RawSAEnv(ParallelEnv):
 
     def _action_transform(self, agent: AgentID, actions: np.ndarray):
         control = np.argmax(actions[0:2])
-        state_expectation = np.argmax(actions[2:5]) - 1
 
         if agent == 'AC':
+            state_expectation = np.argmax(actions[2:5]) - 1
             power_expectation = (actions[5] + 1) * self.hem_env.AC.nominal_power / 2
         elif agent == 'washer':
+            state_expectation = np.argmax(actions[2:4])
             power_expectation = self.hem_env.washer.nominal_power
         elif agent == 'BESS':
+            state_expectation = np.argmax(actions[2:5]) - 1
             if state_expectation > 0:
                 power_expectation = (actions[5] + 1) * self.hem_env.BESS.charge_nominal_power / 2
             else:
@@ -572,7 +578,7 @@ class RawGymEnv(gymnasium.Env):
         self.observation_space = gymnasium.spaces.Box(low=-1e5, high=1e5,
                                                       shape=(len(self.hem_env.AMI.observation_variables),),
                                                       dtype=np.float32)
-        self.action_space = gymnasium.spaces.Box(low=-1, high=1, shape=(6 + 5 + 6,), dtype=np.float32)
+        self.action_space = gymnasium.spaces.Box(low=-1, high=1, shape=(6 + 4 + 6,), dtype=np.float32)
 
         self.possible_agents = ['AC', 'washer', 'BESS']
         self.agents = self.possible_agents
@@ -620,13 +626,13 @@ class RawGymEnv(gymnasium.Env):
         AC_state_expectation = np.argmax(actions[2:5]) - 1
         AC_power_expectation = (actions[5] + 1) * self.hem_env.AC.nominal_power / 2
         BESS_control = np.argmax(actions[6:8])
-        BESS_state_expectation = np.argmax(actions[8:10]) - 1
+        BESS_state_expectation = np.argmax(actions[8:11]) - 1
         if BESS_state_expectation > 0:
-            BESS_power_expectation = (actions[10] + 1) * self.hem_env.BESS.charge_nominal_power / 2
+            BESS_power_expectation = (actions[11] + 1) * self.hem_env.BESS.charge_nominal_power / 2
         else:
-            BESS_power_expectation = (actions[10] + 1) * self.hem_env.BESS.discharge_nominal_power / 2
-        washer_control = np.argmax(actions[11:13])
-        washer_state_expectation = np.argmax(actions[13:15]) - 1
+            BESS_power_expectation = (actions[11] + 1) * self.hem_env.BESS.discharge_nominal_power / 2
+        washer_control = np.argmax(actions[12:14])
+        washer_state_expectation = int(np.argmax(actions[14:16]))
         washer_power_expectation = self.hem_env.washer.nominal_power
 
         actions_template = copy.deepcopy(self.hem_env.init_action)

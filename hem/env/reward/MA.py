@@ -17,15 +17,19 @@ def ac_reward(state: dict):
 
 
 def washer_reward(state: dict):
-    delayed_duration = state['delayed_duration_history'][-1]
-
     # laundry demand reward
-    laundry_demand_reward = -delayed_duration
+    delayed_duration = state['delayed_duration_history'][-1]
+    laundry_demand_reward = math.exp(-delayed_duration)
 
-    cost = - state['home_electrical_cost_history'][-1]
+    # cost reward
+    cost = state['home_electrical_cost_history'][-1]
+    cost_reward = math.exp(-cost)
+    # cost_reward = - cost
 
-    return laundry_demand_reward + 20 * cost
-    # return 1
+    laundry_demand_weight = 1
+    cost_weight = 1
+
+    return laundry_demand_reward * laundry_demand_weight + cost_reward * cost_weight
 
 
 def bess_reward(state: dict):

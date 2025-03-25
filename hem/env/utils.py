@@ -176,19 +176,32 @@ class Renderer:
         axes[5, 0].stairs(self.state['washer_control_history'], label='washer_control')
         axes[5, 0].stairs(self.state['washer_state_history'], label='washer_state')
         axes[5, 0].stairs(self.state['laundry_demand_history'], label='laundry_demand_history', color='red')
-        axes[5, 0].set_ylim(-1.15, 1.15)
+        axes[5, 0].set_ylim(-0.15, 1.15)
         axes[5, 0].legend()
 
         # 洗衣机功率
         axes[6, 0].stairs(self.state['washer_power_expectation_history'], label='washer_power_expectation',
                           alpha=0.5)
         axes[6, 0].stairs(self.state['washer_power_history'], label='washer_power', alpha=0.5)
-        axes[6, 0].stairs(self.state['laundry_demand_history'], label='laundry_demand_history', color='red')
+        axes[6, 0].stairs(self.state['laundry_demand_history'], label='laundry_demand_history')
+        axes[6, 0].stairs(self.state['PV_power_history'], label='PV_power')
         axes[6, 0].legend()
 
+        ax = axes[6, 0].twinx()
+        color = 'tab:red'
+        ax.stairs(self.state['electrical_price_history'], label='electrical_price', color=color)
+        ax.tick_params(axis='y', labelcolor=color)
+        ax.set_ylabel('electrical_price', color=color)
+
+
         # washer reward
-        axes[7, 0].stairs(self.reward_history['washer'], label='washer_reward', color='orange')
+        axes[7, 0].stairs(self.reward_history['washer'], label='washer_reward', color='red')
         axes[7, 0].legend()
+
+        ax = axes[7, 0].twinx()
+        ax.stairs(self.state['delayed_duration_history'], label='delayed_duration')
+        ax.stairs(self.state['laundry_allowed_waiting_time_history'], label='laundry_allowed_waiting_time')
+        ax.legend()
 
         """
         预测base_load
