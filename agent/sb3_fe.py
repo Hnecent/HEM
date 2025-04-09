@@ -8,7 +8,7 @@ device = torch.device("mps") if torch.backends.mps.is_available() else torch.dev
 
 
 class FeaturesExtractor(BaseFeaturesExtractor):
-    def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
+    def __init__(self, observation_space: spaces.Box, stack_size, features_dim: int = 256):
         super().__init__(observation_space, features_dim)
         input_dim = observation_space.shape[0]
         self.features_extractor = nn.Sequential(
@@ -180,6 +180,7 @@ class LinearAttentionLayer(nn.Module):
 class EnhancedFeaturesExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space: spaces.Box, features_dim: int = 256):
         super().__init__(observation_space, features_dim)
+        print(observation_space)
         input_dim = observation_space.shape[0]
 
         # 特征提取主干网络

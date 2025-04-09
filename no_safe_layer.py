@@ -198,7 +198,6 @@ if __name__ == '__main__':
     device_str = input("输入测试设备（cuda, cpu, mps）：")
     device = torch.device(device_str)
     train_timesteps = episode_time_steps * 50000
-
     """
     命名规则：env_model_device
     """

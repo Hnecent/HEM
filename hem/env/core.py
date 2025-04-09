@@ -10,6 +10,7 @@ from hem.env.objects.base import EpisodeTracker
 from hem.env.objects.data import Data
 from hem.env.objects.dynamics import AirHeatDynamics
 from hem.env.objects.demand import Demand
+import hem.env.ami as ami
 from hem.env.ami import AMI
 from hem.env.reward import MA
 
@@ -44,6 +45,8 @@ def sa_env(**kwargs):
 
 def gym_env(**kwargs):
     env = RawGymEnv(**kwargs)
+    env = ss.normalize_obs_v0(env)
+    env = ss.frame_stack_v2(env, stack_size=5)
     return env
 
 
@@ -95,6 +98,8 @@ class HEMEnv:
         self.MINUTES_PER_TIME_STEP = self.config['MINUTES_PER_TIME_STEP']
         # data objects
         self.data = Data(data_start_end, self.MINUTES_PER_TIME_STEP, mode, random_seed, noise_strength)
+        self.data4pre_base_load = Data(data_start_end, ami.PRE_USED_MINUTES_PER_TIME_STEP, mode, random_seed,
+                                       noise_strength)
 
         # devices objects
         self.AC = HeatPump(**self.config['AC_ATTRIBUTES'])
@@ -109,14 +114,14 @@ class HEMEnv:
         self.air_heat_dynamic = AirHeatDynamics(**self.config['AIR_HEAT_DYNAMICS_ATTRIBUTES'])
 
         # AMI
-        self.AMI = AMI(self.MINUTES_PER_TIME_STEP, self.data, self.AC, self.BESS, self.PV, self.washer, self.demand,
-                       self.air_heat_dynamic)
+        self.AMI = AMI(self.MINUTES_PER_TIME_STEP, self.data, self.data4pre_base_load, self.AC, self.BESS, self.PV,
+                       self.washer, self.demand, self.air_heat_dynamic)
 
         # time step
         self.time_step = None
 
         # init action
-        self.init_action = {'AC': {'control': 1, 'state_expectation': 1, 'power_expectation': 0.3},
+        self.init_action = {'AC': {'control': 1, 'state_expectation': 0, 'power_expectation': 0},
                             'washer': {'control': 1, 'state_expectation': 0, 'power_expectation': 0},
                             'BESS': {'control': 1, 'state_expectation': 0, 'power_expectation': 0}}
 
@@ -125,8 +130,53 @@ class HEMEnv:
 
         self.metadata = self.get_metadata()
 
+    def _action_safe_layer(self, action: dict):
+
+        """
+        save energy rules
+        """
+        # AC
+        if self.AMI.running_buffer['occupancy_history'][-1] == 0:
+            action['AC']['state_expectation'] = 0
+
+        # washer
+        if self.AMI.running_buffer['laundry_demand_history'][-1] == 0:
+            action['washer']['state_expectation'] = 0
+
+        """
+        Assistance rules
+        """
+        # BESS base_load 辅助动作
+        if action['BESS']['state_expectation'] != 0:
+            action['BESS']['power_expectation'] = max(action['BESS']['power_expectation'] - action['BESS'][
+                'state_expectation'] * self.AMI.running_buffer['base_load_pre_history'][-1], 0)
+        else:
+            action['BESS']['state_expectation'] = -1
+            action['BESS']['power_expectation'] = self.AMI.running_buffer['base_load_pre_history'][-1]
+
+        """
+        on_demand rules
+        """
+        # AC
+        if action['AC']['state_expectation'] == self.AMI.running_buffer['AC_state_history'][-1] and abs(
+                action['AC']['power_expectation'] - self.AMI.running_buffer['AC_power_history'][-1]) < 0.05:
+            action['AC']['control'] = 0
+
+        # BESS
+        if action['BESS']['state_expectation'] == self.AMI.running_buffer['BESS_state_history'][-1] and abs(
+                action['BESS']['power_expectation'] - self.AMI.running_buffer['BESS_power_history'][-1]) < 0.05:
+            action['BESS']['control'] = 0
+
+        # washer
+        if action['washer']['state_expectation'] == self.AMI.running_buffer['washer_state_history'][-1]:
+            action['washer']['control'] = 0
+
+        return action
+
     def step(self, action: dict):
         assert self.time_step is not None, 'Please reset the environment before taking a step.'
+
+        action = self._action_safe_layer(action)
 
         #  从action中获取控制信号
         AC_action = action["AC"]
@@ -482,7 +532,6 @@ class RawSAEnv(ParallelEnv):
 
         # 转换动作
         actions = self._action_transform(agent, actions[agent])
-        actions = self._action_safe_layer(actions)
 
         # 执行环境步进
         self.hem_env.step(actions)
@@ -545,24 +594,6 @@ class RawSAEnv(ParallelEnv):
                                         'power_expectation': power_expectation})
 
         return actions_template
-
-    def _action_safe_layer(self, actions: dict):
-        # # AC
-        # if actions['AC']['control'] == 1 and actions['AC']['state_expectation'] == self.state['AC_state_history'][
-        #     -1] and abs(actions['AC']['power_expectation'] - self.state['AC_power_history'][-1]) < 0.2:
-        #     actions['AC']['control'] = 0
-        #
-        # # BESS
-        # if actions['BESS']['control'] == 1 and actions['BESS']['state_expectation'] == self.state['BESS_state_history'][
-        #     -1] and abs(actions['BESS']['power_expectation'] - self.state['BESS_power_history'][-1]) < 0.2:
-        #     actions['BESS']['control'] = 0
-
-        # BESS base_load 辅助动作
-        if actions['BESS']['control'] == 1:
-            actions['BESS']['power_expectation'] = actions['BESS']['power_expectation'] - actions['BESS'][
-                'state_expectation'] * self.state['base_load_pre_history'][-1]
-
-        return actions
 
 
 class RawGymEnv(gymnasium.Env):

@@ -8,9 +8,14 @@ from hem.env.objects.device import HeatPump, Battery, Photovoltaic, IndivisibleD
 from hem.env.objects.demand import Demand
 from hem.env.objects.dynamics import AirHeatDynamics
 
-PRE_BASE_LOAD_MODEL_PATH = os.path.join(os.path.dirname(__file__), './base_load_model/best_model.pth')
-PRE_BASE_LOAD_SCALER_PATH = os.path.join(os.path.dirname(__file__), './base_load_model/scaler.npz')
-PRE_USED_TIME_STEPS = 24  # 使用过去24个时间点预测下一个点
+
+PRE_BASE_LOAD_EXP_PATH = os.path.join(os.path.dirname(__file__), '../../checkpoint/base_load_pre/20250327-232617/')
+print(PRE_BASE_LOAD_EXP_PATH)
+PRE_BASE_LOAD_MODEL_PATH = os.path.join(PRE_BASE_LOAD_EXP_PATH, 'best_model.pth')
+PRE_BASE_LOAD_SCALER_PATH = os.path.join(PRE_BASE_LOAD_EXP_PATH, 'scaler.npz')
+# PRE_BASE_LOAD_MODEL_PATH = os.path.join(os.path.dirname(__file__), './base_load_model/best_model.pth')
+# PRE_BASE_LOAD_SCALER_PATH = os.path.join(os.path.dirname(__file__), './base_load_model/scaler.npz')
+PRE_USED_TIME_STEPS = 12 * 5  # 使用过去24个时间点预测下一个点
 PRE_USED_MINUTES_PER_TIME_STEP = 5
 
 
@@ -21,12 +26,13 @@ class AMI:
     2. 采集运行数据，获取家庭能源设备的状态和功率
     """
 
-    def __init__(self, minutes_per_time_step: int, data: Data, AC: HeatPump, BESS: Battery, PV: Photovoltaic,
-                 washer: IndivisibleDevice, demand: Demand, air_heat_dynamics: AirHeatDynamics, pre: bool = True,
-                 real_pre: bool = False):
+    def __init__(self, minutes_per_time_step: int, data: Data, data4_pre_base_load: Data, AC: HeatPump, BESS: Battery,
+                 PV: Photovoltaic, washer: IndivisibleDevice, demand: Demand, air_heat_dynamics: AirHeatDynamics,
+                 pre: bool = True, real_pre: bool = False):
 
         self.minutes_per_time_step = minutes_per_time_step  # 控制时间步长
         self.data = data  # data object
+        self.data4_pre_base_load = data4_pre_base_load
         self.AC = AC
         self.BESS = BESS
         self.PV = PV
@@ -230,57 +236,110 @@ class AMI:
     def pre_base_load(self, time_step: int):
 
         if self.real_pre:
+            assert self.minutes_per_time_step >= PRE_USED_MINUTES_PER_TIME_STEP, f'预测时间步长{PRE_USED_MINUTES_PER_TIME_STEP}大于控制时间步长{self.minutes_per_time_step}'
+            assert self.minutes_per_time_step % PRE_USED_MINUTES_PER_TIME_STEP == 0, f'控制时间步长{self.minutes_per_time_step}必须是预测时间步长{PRE_USED_MINUTES_PER_TIME_STEP}的整数倍'
+            mag = self.minutes_per_time_step // PRE_USED_MINUTES_PER_TIME_STEP
+            sequence_length = PRE_USED_TIME_STEPS  # 预测模型需要的历史时间步长度
             self.base_load_pre_model.eval()
-
-            # 使用前5个时间步的数据预测下一个时间步的数据，不够的用0填充
-            # 准备输入数据
-            sequence_length = PRE_USED_TIME_STEPS
+            # 初始化输入特征序列
             input_features = []
-
-            # 收集历史数据（自动填充不足部分）
-            for t in range(time_step - sequence_length + 1, time_step + 1):
-                if t < 0:  # 数据不足时用0填充
-                    features = [
-                        0.0,  # base_load
-                        0.0,  # month
-                        0.0,  # day
-                        0.0,  # hour
-                        0.0,  # minute
-                        0.0  # day_of_week
-                    ]
+            for t in range(time_step * mag + 1 - sequence_length, time_step * mag + 1):  # +1是包含当前时间步
+                if t < 0:
+                    features = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
                 else:
                     features = [
-                        self.data.base_load[t],
-                        self.data.month[t],
-                        self.data.day[t],
-                        self.data.hour[t],
-                        self.data.minute[t],
-                        self.data.day_type[t]
+                        self.data4_pre_base_load.base_load[t],
+                        self.data4_pre_base_load.month[t],
+                        self.data4_pre_base_load.day[t],
+                        self.data4_pre_base_load.hour[t],
+                        self.data4_pre_base_load.minute[t],
+                        self.data4_pre_base_load.day_type[t]
                     ]
                 input_features.append(features)
-            # 转换为numpy数组
-            input_array = np.array(input_features, dtype=np.float32)
-            # 数据标准化（使用训练时的scaler）
-            scaled_input = np.zeros_like(input_array)
-            feature_names = ['base_load', 'month', 'day', 'hour', 'minute', 'day_of_week']
-            for i, name in enumerate(feature_names):
-                scaler = self.scaler[name]
-                scaled_input[:, i] = scaler.transform(input_array[:, i].reshape(-1, 1)).flatten()
-            # 转换为PyTorch Tensor
-            input_tensor = torch.tensor(scaled_input, dtype=torch.float32).unsqueeze(0)  # (1, USE_PRE_TIME_STEP, 6)
-            # 执行预测
-            with torch.no_grad():
-                prediction = self.base_load_pre_model(input_tensor).cpu().numpy().flatten()[0]
-            # 反标准化预测结果
-            base_load_scaler = self.scaler['base_load']
-            base_load_pre = base_load_scaler.inverse_transform([[prediction]])[0][0]
+            predictions = []  # 存储所有预测结果
+            for m in range(mag):
+                # 转换为numpy数组并标准化
+                input_array = np.array(input_features, dtype=np.float32)
+                scaled_input = np.zeros_like(input_array)
+                feature_names = ['base_load', 'month', 'day', 'hour', 'minute', 'day_of_week']
+                for i, name in enumerate(feature_names):
+                    scaler = self.scaler[name]
+                    scaled_input[:, i] = scaler.transform(input_array[:, i].reshape(-1, 1)).flatten()
+                # 执行预测
+                input_tensor = torch.tensor(scaled_input, dtype=torch.float32).unsqueeze(0)
+                with torch.no_grad():
+                    prediction = self.base_load_pre_model(input_tensor).cpu().numpy().flatten()[0]
+                # 反标准化预测结果
+                base_load_scaler = self.scaler['base_load']
+                base_load_pre = base_load_scaler.inverse_transform([[prediction]])[0][0]
+                predictions.append(base_load_pre)  # 保存预测结果
+                # 生成下一个时间步的其他特征
+                next_t = time_step * mag + m + 1
+                next_features = [
+                    base_load_pre,  # 预测的base_load
+                    self.data4_pre_base_load.month[next_t],  # 下一个时间步的month
+                    self.data4_pre_base_load.day[next_t],  # 下一个时间步的day
+                    self.data4_pre_base_load.hour[next_t],  # 下一个时间步的hour
+                    self.data4_pre_base_load.minute[next_t],  # 下一个时间步的minute
+                    self.data4_pre_base_load.day_type[next_t]  # 下一个时间步的day_of_week
+                ]
+                # 更新输入序列：移除最早的时间步数据，添加新预测数据
+                input_features.pop(0)
+                input_features.append(next_features)
+            # 返回最终的控制步长预测结果（最后一个预测值）
+            finally_base_load_pre = predictions[-1]
+
+            # self.base_load_pre_model.eval()
+            #
+            # # 使用前5个时间步的数据预测下一个时间步的数据，不够的用0填充
+            # # 准备输入数据
+            # sequence_length = PRE_USED_TIME_STEPS
+            # input_features = []
+            #
+            # # 收集历史数据（自动填充不足部分）
+            # for t in range(time_step - sequence_length + 1, time_step + 1):
+            #     if t < 0:  # 数据不足时用0填充
+            #         features = [
+            #             0.0,  # base_load
+            #             0.0,  # month
+            #             0.0,  # day
+            #             0.0,  # hour
+            #             0.0,  # minute
+            #             0.0  # day_of_week
+            #         ]
+            #     else:
+            #         features = [
+            #             self.data.base_load[t],
+            #             self.data.month[t],
+            #             self.data.day[t],
+            #             self.data.hour[t],
+            #             self.data.minute[t],
+            #             self.data.day_type[t]
+            #         ]
+            #     input_features.append(features)
+            # # 转换为numpy数组
+            # input_array = np.array(input_features, dtype=np.float32)
+            # # 数据标准化（使用训练时的scaler）
+            # scaled_input = np.zeros_like(input_array)
+            # feature_names = ['base_load', 'month', 'day', 'hour', 'minute', 'day_of_week']
+            # for i, name in enumerate(feature_names):
+            #     scaler = self.scaler[name]
+            #     scaled_input[:, i] = scaler.transform(input_array[:, i].reshape(-1, 1)).flatten()
+            # # 转换为PyTorch Tensor
+            # input_tensor = torch.tensor(scaled_input, dtype=torch.float32).unsqueeze(0)  # (1, USE_PRE_TIME_STEP, 6)
+            # # 执行预测
+            # with torch.no_grad():
+            #     prediction = self.base_load_pre_model(input_tensor).cpu().numpy().flatten()[0]
+            # # 反标准化预测结果
+            # base_load_scaler = self.scaler['base_load']
+            # finally_base_load_pre = base_load_scaler.inverse_transform([[prediction]])[0][0]
         else:
             try:
-                base_load_pre = self.data.base_load[time_step + 1]
+                finally_base_load_pre = self.data.base_load[time_step + 1]
             except KeyError:
-                base_load_pre = self.data.base_load[time_step]
+                finally_base_load_pre = self.data.base_load[time_step]
 
-        return base_load_pre
+        return finally_base_load_pre
 
     def collect_running_data(self, action: dict, time_step: int):
         """
@@ -388,26 +447,28 @@ class AMI:
         self.washer_start_count = 0
 
 
-class TimeSeriesModel(nn.Module):
-    def __init__(self, input_size=6, hidden_size=128, num_layers=2):
-        super(TimeSeriesModel, self).__init__()
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=0.2
-        )
-        self.fc = nn.Sequential(
-            nn.Linear(hidden_size, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
-        )
+# from hem.env.tsm.models.TimesNet import Model as TimeSeriesModel
 
-    def forward(self, x):
-        out, _ = self.lstm(x)  # out shape: (batch_size, seq_len, hidden_size)
-        out = self.fc(out[:, -1, :])  # 取最后一个时间步的输出
-        return out
+# class TimeSeriesModel(nn.Module):
+#     def __init__(self, input_size=6, hidden_size=128, num_layers=2):
+#         super(TimeSeriesModel, self).__init__()
+#         self.lstm = nn.LSTM(
+#             input_size=input_size,
+#             hidden_size=hidden_size,
+#             num_layers=num_layers,
+#             batch_first=True,
+#             dropout=0.2
+#         )
+#         self.fc = nn.Sequential(
+#             nn.Linear(hidden_size, 64),
+#             nn.ReLU(),
+#             nn.Linear(64, 1)
+#         )
+#
+#     def forward(self, x):
+#         out, _ = self.lstm(x)  # out shape: (batch_size, seq_len, hidden_size)
+#         out = self.fc(out[:, -1, :])  # 取最后一个时间步的输出
+#         return out
 
 # class TimeSeriesModel(nn.Module):
 #     def __init__(self, input_size=6, hidden_size=64, num_layers=2):
@@ -498,3 +559,121 @@ class TimeSeriesModel(nn.Module):
 #
 #         # 正则化预测
 #         return self.fc(context)
+
+
+# class TimeSeriesModel(nn.Module):
+#     def __init__(self, input_size=6, hidden_size=64, num_layers=2):
+#         super().__init__()
+#
+#         # 双向GRU主体
+#         self.gru = nn.GRU(
+#             input_size=input_size,
+#             hidden_size=hidden_size,
+#             num_layers=num_layers,
+#             batch_first=True,
+#             bidirectional=False,
+#             dropout=0.3
+#         )
+#
+#         # 时间门控组件（T-Gating）
+#         self.time_gate = nn.Sequential(
+#             nn.Linear(hidden_size, 8),
+#             nn.Tanh(),
+#             nn.LayerNorm(8),
+#             nn.Linear(8, 1),
+#             nn.Sigmoid()
+#         )
+#
+#         # 特征通道门控组件（C-Gating）
+#         self.channel_gate = nn.Sequential(
+#             nn.Linear(hidden_size, hidden_size),
+#             nn.LayerNorm(hidden_size),
+#             nn.Sigmoid()
+#         )
+#
+#         # 预测头
+#         self.fc = nn.Sequential(
+#             nn.Linear(hidden_size, 32),
+#             nn.Dropout(0.2),
+#             nn.LayerNorm(32),
+#             nn.GELU(),
+#             nn.Linear(32, 1)
+#         )
+#
+#     def forward(self, x):
+#         # GRU处理
+#         gru_out, _ = self.gru(x)  # [batch, seq_len, 2*hidden]
+#
+#         # 时间门控（作用于序列维度）
+#         time_weights = self.time_gate(gru_out)  # [batch, seq_len, 1]
+#         time_gated = gru_out * time_weights
+#
+#         # 特征门控（作用于通道维度）
+#         channel_weights = self.channel_gate(time_gated)  # [batch, seq_len, 2*hidden]
+#         hybrid_gated = time_gated * channel_weights
+#
+#         # 动态特征聚合
+#         context = torch.mean(hybrid_gated, dim=1)  # [batch, 2*hidden]
+#
+#         return self.fc(context)
+
+
+class TimeSeriesModel(nn.Module):
+    def __init__(self, input_size=6, hidden_size=64, num_layers=2):
+        super().__init__()
+
+        # 门控组件前置
+        # 时间门控（作用于输入序列维度）
+        self.time_gate = nn.Sequential(
+            nn.Linear(input_size, 8),  # 修改输入维度
+            nn.Tanh(),
+            nn.LayerNorm(8),
+            nn.Linear(8, 1),
+            nn.Sigmoid()
+        )
+
+        # 特征通道门控（作用于输入特征维度）
+        self.channel_gate = nn.Sequential(
+            nn.Linear(input_size, input_size),  # 修改输入维度
+            nn.LayerNorm(input_size),
+            nn.Sigmoid()
+        )
+
+        # 双向GRU主体（保持原始结构）
+        self.gru = nn.GRU(
+            input_size=input_size,  # 注意输入维度不变
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            bidirectional=False,
+            dropout=0.3
+        )
+
+        # 预测头（保持原始结构）
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size, 32),
+            nn.Dropout(0.2),
+            nn.LayerNorm(32),
+            nn.GELU(),
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, x):
+        # 输入维度处理 [batch, seq_len, input_size]
+
+        # 时间门控（先作用于序列维度）
+        time_weights = self.time_gate(x)  # [batch, seq_len, 1]
+        time_gated = x * time_weights  # 广播机制自动扩展维度
+
+        # 特征通道门控（再作用于特征维度）
+        channel_weights = self.channel_gate(time_gated)  # [batch, seq_len, input_size]
+        hybrid_input = time_gated * channel_weights
+
+        # GRU处理门控后的输入
+        gru_out, _ = self.gru(hybrid_input)  # [batch, seq_len, hidden_size]
+
+        # 动态特征聚合
+        context = torch.mean(gru_out, dim=1)  # [batch, hidden_size]
+
+        return self.fc(context)
+

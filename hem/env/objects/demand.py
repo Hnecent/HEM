@@ -35,6 +35,8 @@ class Demand:
 
     def __update_laundry_demand(self, time_step: int):
         self.laundry_demand = self.data.laundry_demand[time_step]
+        if self.laundry_demand == 1:
+            print('zhaodao')
         self.laundry_allowed_waiting_time = self.data.laundry_allowed_waiting_time[time_step]
 
     def reset(self, time_step: int):
